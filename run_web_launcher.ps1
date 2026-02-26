@@ -62,10 +62,11 @@ function Ensure-ConvertShortcut {
         $shell = New-Object -ComObject WScript.Shell
         $shortcut = $shell.CreateShortcut($shortcutPath)
 
-        $expectedTarget = Join-Path $env:WINDIR "System32\wscript.exe"
-        $expectedArguments = '"' + $vbsPath + '"'
+        $expectedTarget = $vbsPath
+        $expectedArguments = ""
         $expectedWorkingDir = $PSScriptRoot
-        $expectedIcon = if (Test-Path $iconPath) { $iconPath + ",0" } else { $null }
+        $fallbackIcon = (Join-Path $env:WINDIR "System32\shell32.dll") + ",13"
+        $expectedIcon = if (Test-Path $iconPath) { $iconPath + ",0" } else { $fallbackIcon }
 
         $changed = $false
         if ($shortcut.TargetPath -ne $expectedTarget) {
