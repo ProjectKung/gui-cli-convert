@@ -1,7 +1,8 @@
 param(
     [switch]$NoBrowser,
     [switch]$AutoInstallPython,
-    [switch]$StopOldServer = $true
+    [switch]$StopOldServer = $true,
+    [switch]$SkipSelfUpdate
 )
 
 $ErrorActionPreference = "Stop"
@@ -54,6 +55,90 @@ function Invoke-NativeNoThrow {
         $ErrorActionPreference = $oldErrorAction
         if ($hasNativePref) {
             $PSNativeCommandUseErrorActionPreference = $oldNativePref
+        }
+    }
+}
+
+function Invoke-GitHubSelfUpdate {
+    if ($SkipSelfUpdate) {
+        return
+    }
+
+    $repoOwner = "ProjectKung"
+    $repoName = "gui-cli-convert"
+    $repoBranch = "main"
+    $zipUrl = "https://codeload.github.com/$repoOwner/$repoName/zip/refs/heads/$repoBranch"
+
+    Set-SetupStatus -StatusText "Checking updates..."
+    Write-Host "[UPDATE] Checking updates from GitHub..."
+
+    $tempRoot = Join-Path $env:TEMP ("switch-converter-update-" + [Guid]::NewGuid().ToString("N"))
+    $zipPath = Join-Path $tempRoot "$repoName-$repoBranch.zip"
+    $extractPath = Join-Path $tempRoot "extract"
+
+    try {
+        New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
+        New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
+
+        Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing -TimeoutSec 8 -ErrorAction Stop
+        Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+
+        $sourceRoot = Get-ChildItem -Path $extractPath -Directory | Select-Object -First 1
+        if (-not $sourceRoot) {
+            throw "Cannot find extracted update folder."
+        }
+
+        $excludeDirs = @(
+            (Join-Path $PSScriptRoot ".git"),
+            (Join-Path $PSScriptRoot ".venv"),
+            (Join-Path $PSScriptRoot ".venv_repair"),
+            (Join-Path $PSScriptRoot "output"),
+            (Join-Path $PSScriptRoot "__pycache__")
+        )
+
+        $robocopyArgs = @(
+            $sourceRoot.FullName,
+            $PSScriptRoot,
+            "/E",
+            "/R:1",
+            "/W:1",
+            "/FFT",
+            "/NFL",
+            "/NDL",
+            "/NJH",
+            "/NJS",
+            "/NP",
+            "/XD"
+        )
+        $robocopyArgs += $excludeDirs
+        $robocopyArgs += @("/XF", "*.pyc", "*.pyo", "*.lnk")
+
+        $robocopyExit = Invoke-NativeNoThrow -Exe "robocopy" -CommandArgs $robocopyArgs -Quiet
+        if ($robocopyExit -gt 7) {
+            throw ("robocopy failed with exit code {0}" -f $robocopyExit)
+        }
+
+        $changed = (($robocopyExit -band 7) -ne 0)
+        if ($changed) {
+            Set-SetupStatus -StatusText "Update applied."
+            Write-Host "[UPDATE] Updated to latest version."
+        }
+        else {
+            Set-SetupStatus -StatusText "Already up to date."
+            Write-Host "[UPDATE] Already up to date."
+        }
+    }
+    catch {
+        $message = $_.Exception.Message
+        if ([string]::IsNullOrWhiteSpace($message)) {
+            $message = "Unknown update error."
+        }
+        Set-SetupStatus -StatusText "Update skipped (offline or blocked)."
+        Write-Warning ("[UPDATE] Skipped: {0}" -f $message)
+    }
+    finally {
+        if (Test-Path $tempRoot) {
+            Remove-Item -Path $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 }
@@ -333,6 +418,8 @@ function Remove-DirectoryRobust {
 
     throw "Failed to remove $PathToRemove. Please close apps that may lock this folder and run again."
 }
+
+Invoke-GitHubSelfUpdate
 
 $pythonCommand = Ensure-Python
 $pythonExe = $pythonCommand.Exe

@@ -15,6 +15,7 @@ echo ============================================================
 echo  URL: http://127.0.0.1:5000
 echo  Mode: Console (show logs)
 echo  Tip : Use "run_web.vbs" for tray mode (no console)
+echo  Auto-update: ON (GitHub main)
 echo.
 echo [INFO] Preparing environment and starting web app...
 echo.
