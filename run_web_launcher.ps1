@@ -50,45 +50,143 @@ function Write-LauncherLog {
     }
 }
 
+function Ensure-ShortcutInteropType {
+    if ("PortableShortcut.ShortcutHelper" -as [type]) {
+        return
+    }
+
+    Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+namespace PortableShortcut {
+    [ComImport, Guid("00021401-0000-0000-C000-000000000046")]
+    internal class ShellLink { }
+
+    [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("000214F9-0000-0000-C000-000000000046")]
+    internal interface IShellLinkW {
+        void GetPath(IntPtr pszFile, int cchMaxPath, IntPtr pfd, int fFlags);
+        void GetIDList(out IntPtr ppidl);
+        void SetIDList(IntPtr pidl);
+        void GetDescription(IntPtr pszName, int cchMaxName);
+        void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+        void GetWorkingDirectory(IntPtr pszDir, int cchMaxPath);
+        void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
+        void GetArguments(IntPtr pszArgs, int cchMaxPath);
+        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
+        void GetHotkey(out short pwHotkey);
+        void SetHotkey(short wHotkey);
+        void GetShowCmd(out int piShowCmd);
+        void SetShowCmd(int iShowCmd);
+        void GetIconLocation(IntPtr pszIconPath, int cchIconPath, out int piIcon);
+        void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
+        void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, int dwReserved);
+        void Resolve(IntPtr hwnd, int fFlags);
+        void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
+    }
+
+    [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("0000010b-0000-0000-C000-000000000046")]
+    internal interface IPersistFile {
+        void GetClassID(out Guid pClassID);
+        void IsDirty();
+        void Load([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, uint dwMode);
+        void Save([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, bool fRemember);
+        void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string pszFileName);
+        void GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string ppszFileName);
+    }
+
+    public static class ShortcutHelper {
+        public static void Save(
+            string shortcutPath,
+            string targetPath,
+            string arguments,
+            string workingDirectory,
+            string iconLocation,
+            string relativeHint,
+            string description
+        ) {
+            IShellLinkW link = (IShellLinkW)new ShellLink();
+            try {
+                link.SetPath(targetPath ?? string.Empty);
+                link.SetArguments(arguments ?? string.Empty);
+                link.SetWorkingDirectory(workingDirectory ?? string.Empty);
+                link.SetDescription(description ?? string.Empty);
+
+                if (!string.IsNullOrWhiteSpace(iconLocation)) {
+                    string iconPath = iconLocation;
+                    int iconIndex = 0;
+                    int commaIndex = iconLocation.LastIndexOf(',');
+                    if (commaIndex > 0) {
+                        string maybeIndex = iconLocation.Substring(commaIndex + 1);
+                        int parsedIndex;
+                        if (int.TryParse(maybeIndex, out parsedIndex)) {
+                            iconPath = iconLocation.Substring(0, commaIndex);
+                            iconIndex = parsedIndex;
+                        }
+                    }
+                    link.SetIconLocation(iconPath, iconIndex);
+                }
+
+                if (!string.IsNullOrWhiteSpace(relativeHint)) {
+                    link.SetRelativePath(relativeHint, 0);
+                }
+
+                ((IPersistFile)link).Save(shortcutPath, true);
+            }
+            finally {
+                if (link != null) {
+                    Marshal.FinalReleaseComObject(link);
+                }
+            }
+        }
+    }
+}
+"@
+}
+
 function Ensure-ConvertShortcut {
     try {
         $shortcutPath = Join-Path $PSScriptRoot "Convert CLI-GUI.lnk"
         $vbsPath = Join-Path $PSScriptRoot "run_web.vbs"
         $iconPath = Join-Path $PSScriptRoot "static\convert_cli_gui_v2.ico"
-        if (-not (Test-Path $shortcutPath) -or -not (Test-Path $vbsPath)) {
+        if (-not (Test-Path $vbsPath)) {
             return
         }
-
-        $shell = New-Object -ComObject WScript.Shell
-        $shortcut = $shell.CreateShortcut($shortcutPath)
 
         $expectedTarget = $vbsPath
         $expectedArguments = ""
         $expectedWorkingDir = $PSScriptRoot
+        $expectedDescription = "Switch Converter Launcher"
         $fallbackIcon = (Join-Path $env:WINDIR "System32\shell32.dll") + ",13"
         $expectedIcon = if (Test-Path $iconPath) { $iconPath + ",0" } else { $fallbackIcon }
 
-        $changed = $false
-        if ($shortcut.TargetPath -ne $expectedTarget) {
-            $shortcut.TargetPath = $expectedTarget
-            $changed = $true
-        }
-        if ($shortcut.Arguments -ne $expectedArguments) {
-            $shortcut.Arguments = $expectedArguments
-            $changed = $true
-        }
-        if ($shortcut.WorkingDirectory -ne $expectedWorkingDir) {
-            $shortcut.WorkingDirectory = $expectedWorkingDir
-            $changed = $true
-        }
-        if ($expectedIcon -and $shortcut.IconLocation -ne $expectedIcon) {
-            $shortcut.IconLocation = $expectedIcon
-            $changed = $true
+        $needsRewrite = -not (Test-Path $shortcutPath)
+        if (-not $needsRewrite) {
+            $shell = New-Object -ComObject WScript.Shell
+            $shortcut = $shell.CreateShortcut($shortcutPath)
+            if (
+                $shortcut.TargetPath -ne $expectedTarget -or
+                $shortcut.Arguments -ne $expectedArguments -or
+                $shortcut.WorkingDirectory -ne $expectedWorkingDir -or
+                $shortcut.IconLocation -ne $expectedIcon -or
+                $shortcut.Description -ne $expectedDescription
+            ) {
+                $needsRewrite = $true
+            }
         }
 
-        if ($changed) {
-            $shortcut.Save()
-            Write-LauncherLog -Message "Shortcut repaired: Convert CLI-GUI.lnk"
+        if ($needsRewrite) {
+            Ensure-ShortcutInteropType
+            [PortableShortcut.ShortcutHelper]::Save(
+                $shortcutPath,
+                $expectedTarget,
+                $expectedArguments,
+                $expectedWorkingDir,
+                $expectedIcon,
+                $expectedTarget,
+                $expectedDescription
+            )
+            Write-LauncherLog -Message "Shortcut repaired as portable link: Convert CLI-GUI.lnk"
         }
     }
     catch {
