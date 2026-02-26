@@ -111,7 +111,7 @@ function Invoke-GitHubSelfUpdate {
             "/XD"
         )
         $robocopyArgs += $excludeDirs
-        $robocopyArgs += @("/XF", "*.pyc", "*.pyo", "*.lnk")
+        $robocopyArgs += @("/XF", "*.pyc", "*.pyo")
 
         $robocopyExit = Invoke-NativeNoThrow -Exe "robocopy" -CommandArgs $robocopyArgs -Quiet
         if ($robocopyExit -gt 7) {

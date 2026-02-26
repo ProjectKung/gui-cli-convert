@@ -63,9 +63,9 @@ function Ensure-ConvertShortcut {
         $shortcut = $shell.CreateShortcut($shortcutPath)
 
         $expectedTarget = Join-Path $env:WINDIR "System32\wscript.exe"
-        $expectedArguments = '"' + $vbsPath + '"'
-        $expectedWorkingDir = $PSScriptRoot
-        $expectedIcon = if (Test-Path $iconPath) { $iconPath + ",0" } else { $null }
+        $expectedArguments = '"run_web.vbs"'
+        $expectedWorkingDir = ""
+        $expectedIcon = "static\convert_cli_gui_v2.ico,0"
 
         $changed = $false
         if ($shortcut.TargetPath -ne $expectedTarget) {
