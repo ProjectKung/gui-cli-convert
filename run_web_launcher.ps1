@@ -50,6 +50,51 @@ function Write-LauncherLog {
     }
 }
 
+function Ensure-ConvertShortcut {
+    try {
+        $shortcutPath = Join-Path $PSScriptRoot "Convert CLI-GUI.lnk"
+        $vbsPath = Join-Path $PSScriptRoot "run_web.vbs"
+        $iconPath = Join-Path $PSScriptRoot "static\convert_cli_gui_v2.ico"
+        if (-not (Test-Path $shortcutPath) -or -not (Test-Path $vbsPath)) {
+            return
+        }
+
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+
+        $expectedTarget = Join-Path $env:WINDIR "System32\wscript.exe"
+        $expectedArguments = '"' + $vbsPath + '"'
+        $expectedWorkingDir = $PSScriptRoot
+        $expectedIcon = if (Test-Path $iconPath) { $iconPath + ",0" } else { $null }
+
+        $changed = $false
+        if ($shortcut.TargetPath -ne $expectedTarget) {
+            $shortcut.TargetPath = $expectedTarget
+            $changed = $true
+        }
+        if ($shortcut.Arguments -ne $expectedArguments) {
+            $shortcut.Arguments = $expectedArguments
+            $changed = $true
+        }
+        if ($shortcut.WorkingDirectory -ne $expectedWorkingDir) {
+            $shortcut.WorkingDirectory = $expectedWorkingDir
+            $changed = $true
+        }
+        if ($expectedIcon -and $shortcut.IconLocation -ne $expectedIcon) {
+            $shortcut.IconLocation = $expectedIcon
+            $changed = $true
+        }
+
+        if ($changed) {
+            $shortcut.Save()
+            Write-LauncherLog -Message "Shortcut repaired: Convert CLI-GUI.lnk"
+        }
+    }
+    catch {
+        Write-LauncherLog -Message ("Shortcut repair failed: {0}" -f $_.Exception.Message)
+    }
+}
+
 function Get-SetupStatusText {
     param(
         [Parameter(Mandatory = $true)]
@@ -162,6 +207,7 @@ function New-BrandIcon {
     return $icon
 }
 
+Ensure-ConvertShortcut
 $appIcon = New-BrandIcon
 
 function Test-ServerReady {
@@ -186,30 +232,85 @@ function Stop-WebServer {
         [string]$HealthCheckUrl
     )
 
+    $candidatePids = New-Object "System.Collections.Generic.HashSet[int]"
     if ($BootstrapPid -gt 0) {
-        try {
-            Stop-Process -Id $BootstrapPid -Force -ErrorAction SilentlyContinue
-        }
-        catch {
-            # Process may already be stopped.
-        }
+        [void]$candidatePids.Add($BootstrapPid)
     }
 
     try {
         $serverPids = Get-NetTCPConnection -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue |
             Select-Object -ExpandProperty OwningProcess -Unique
-
         foreach ($serverPid in $serverPids) {
-            if ($serverPid -and $serverPid -ne $PID) {
-                Stop-Process -Id $serverPid -Force -ErrorAction SilentlyContinue
+            if ($serverPid) {
+                [void]$candidatePids.Add([int]$serverPid)
             }
         }
     }
     catch {
-        # Ignore failures while forcing stop.
+        # Ignore and try fallback method below.
     }
 
-    Start-Sleep -Milliseconds 350
+    if ($candidatePids.Count -eq 0) {
+        try {
+            $netstatOutput = & netstat -ano -p tcp 2>$null
+            foreach ($line in $netstatOutput) {
+                $match = [regex]::Match($line, "^\s*TCP\s+\S+:5000\s+\S+\s+LISTENING\s+(\d+)\s*$")
+                if ($match.Success) {
+                    [void]$candidatePids.Add([int]$match.Groups[1].Value)
+                }
+            }
+        }
+        catch {
+            # Ignore fallback parsing failures.
+        }
+    }
+
+    try {
+        $venvPythonPath = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
+        $venvPythonPids = Get-Process -Name python -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -and $_.Path -ieq $venvPythonPath } |
+            Select-Object -ExpandProperty Id
+        foreach ($venvPid in $venvPythonPids) {
+            if ($venvPid) {
+                [void]$candidatePids.Add([int]$venvPid)
+            }
+        }
+    }
+    catch {
+        # Ignore process enumeration failures.
+    }
+
+    for ($attempt = 1; $attempt -le 4; $attempt++) {
+        foreach ($candidatePid in @($candidatePids)) {
+            if ($candidatePid -and $candidatePid -ne $PID) {
+                try {
+                    Stop-Process -Id $candidatePid -Force -ErrorAction SilentlyContinue
+                }
+                catch {
+                    # Process may already be stopped.
+                }
+            }
+        }
+
+        Start-Sleep -Milliseconds (220 * $attempt)
+        if (-not (Test-ServerReady -HealthCheckUrl $HealthCheckUrl)) {
+            return $true
+        }
+
+        try {
+            $retryPids = Get-NetTCPConnection -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue |
+                Select-Object -ExpandProperty OwningProcess -Unique
+            foreach ($retryPid in $retryPids) {
+                if ($retryPid) {
+                    [void]$candidatePids.Add([int]$retryPid)
+                }
+            }
+        }
+        catch {
+            # Ignore failures while retrying.
+        }
+    }
+
     return -not (Test-ServerReady -HealthCheckUrl $HealthCheckUrl)
 }
 
