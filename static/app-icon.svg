@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="GUI Convert icon">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d6fd6" />
+      <stop offset="100%" stop-color="#1fa2ff" />
+    </linearGradient>
+    <linearGradient id="badge" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1f8f52" />
+      <stop offset="100%" stop-color="#28b463" />
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="224" height="224" rx="52" fill="url(#bg)" />
+  <path d="M84 62h70l36 36v96c0 9-7 16-16 16H84c-9 0-16-7-16-16V78c0-9 7-16 16-16z" fill="#ffffff" />
+  <path d="M154 62v26c0 8 6 14 14 14h22z" fill="#d9ebff" />
+  <rect x="90" y="114" width="78" height="10" rx="5" fill="#d2e6ff" />
+  <rect x="90" y="136" width="78" height="10" rx="5" fill="#d2e6ff" />
+  <rect x="90" y="158" width="56" height="10" rx="5" fill="#d2e6ff" />
+  <circle cx="182" cy="180" r="32" fill="url(#badge)" />
+  <path d="M171 183l8 8 15-17" fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round" stroke-width="8" />
+</svg>

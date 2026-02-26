@@ -1,0 +1,1018 @@
+﻿<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>เครื่องมือจัดการไฟล์ของ Switch แบบ GUI</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='app-icon.svg', v=app_build) }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='site.css', v=app_build) }}" />
+  </head>
+  <body>
+    <main class="layout">
+      <section class="panel">
+        <header class="hero has-add-tab">
+          <a
+            class="hero-add-tab"
+            href="{{ url_for('index') }}"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="เปิดหน้าโหมด GUI ในแท็บใหม่"
+          >
+            เพิ่มแท็บ GUI
+          </a>
+          <p class="eyebrow">SWITCH แบบ GUI</p>
+          <h1>เครื่องมือจัดการไฟล์ของ Switch แบบ GUI</h1>
+          <p class="subtitle">
+            อัปโหลด 3 ไฟล์ แล้วสร้างผลลัพธ์รวมเป็น PDF หรือ Word
+          </p>
+          <nav class="mode-switch" aria-label="เลือกโหมดการใช้งาน">
+            <a class="mode-pill active" href="{{ url_for('index') }}">โหมด GUI</a>
+            <a class="mode-pill" href="{{ url_for('cli_home') }}">โหมด CLI</a>
+          </nav>
+          <p class="build">เวอร์ชัน Build: {{ app_build }}</p>
+          <section class="clock-config">
+            <label class="clock-config-toggle">
+              <input id="clock-custom-mode" type="checkbox" name="clock_custom_mode" form="generate-form" value="1" />
+              <span>กำหนดวัน/เวลาเอง</span>
+            </label>
+            <div id="clock-custom-fields" class="clock-config-fields" hidden>
+              <label>
+                <span>วันที่</span>
+                <div class="date-picker-wrap">
+                  <input
+                    id="clock-date"
+                    type="text"
+                    inputmode="numeric"
+                    maxlength="10"
+                    autocomplete="off"
+                    placeholder="วัน/เดือน/ปี เช่น 25/02/2026"
+                  />
+                  <button
+                    id="clock-date-picker-btn"
+                    class="date-picker-btn"
+                    type="button"
+                    aria-label="เปิดปฏิทิน"
+                  >
+                    📅
+                  </button>
+                  <input
+                    id="clock-date-native"
+                    class="date-picker-native"
+                    type="date"
+                    lang="en-GB"
+                    name="clock_date"
+                    form="generate-form"
+                    tabindex="-1"
+                    aria-hidden="true"
+                  />
+                </div>
+              </label>
+              <label class="clock-time-start">
+                <span>เริ่ม:</span>
+                <div class="clock-time-picker">
+                  <select id="clock-start-hour" aria-label="เวลาเริ่มต้นแบบ 24 ชั่วโมง"></select>
+                  <span class="clock-time-sep">:</span>
+                  <select id="clock-start-minute" aria-label="นาทีเริ่ม"></select>
+                  <span class="clock-time-sep">:</span>
+                  <select id="clock-start-second" aria-label="วินาทีเริ่ม"></select>
+                </div>
+                <input id="clock-start" type="hidden" name="clock_start" form="generate-form" value="08:00:00" />
+              </label>
+              <label class="clock-time-end">
+                <span>เวลาปิดงาน:</span>
+                <div class="clock-time-picker">
+                  <select id="clock-end-hour" aria-label="เวลาปิดงานแบบ 24 ชั่วโมง"></select>
+                  <span class="clock-time-sep">:</span>
+                  <select id="clock-end-minute" aria-label="นาทีปิดงาน"></select>
+                  <span class="clock-time-sep">:</span>
+                  <select id="clock-end-second" aria-label="วินาทีปิดงาน"></select>
+                </div>
+                <input id="clock-end" type="hidden" name="clock_end" form="generate-form" value="18:00:00" />
+              </label>
+            </div>
+          </section>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <div class="alerts">
+              {% for category, message in messages %}
+                <div class="alert {{ category }}">{{ message }}</div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+
+        <form id="generate-form" action="{{ url_for('generate') }}" method="post" enctype="multipart/form-data" class="form">
+          <input id="output-format" type="hidden" name="output_format" value="pdf" />
+
+          <section class="quick-guide">
+            <h2>วิธีใช้งานแบบเร็ว</h2>
+            <ol>
+              <li>เลือกไฟล์ที่ต้องการทั้ง 3 ไฟล์</li>
+              <li>เลือกปุ่มดาวน์โหลด PDF หรือ Word</li>
+              <li>รอระบบสร้างไฟล์และดาวน์โหลดอัตโนมัติ</li>
+            </ol>
+          </section>
+
+          <section class="upload-status" aria-live="polite">
+            <div class="upload-status-row">
+              <span>ไฟล์ Config ของ Switch แบบ GUI</span>
+              <strong id="status-fdo" class="status-value">ยังไม่เลือกไฟล์</strong>
+            </div>
+            <div class="upload-status-row">
+              <span>ไฟล์ APIC</span>
+              <strong id="status-apic" class="status-value">ยังไม่เลือกไฟล์</strong>
+            </div>
+            <div class="upload-status-row">
+              <span>ไฟล์ Show Log</span>
+              <strong id="status-image" class="status-value">ยังไม่เลือกไฟล์</strong>
+            </div>
+            <div class="upload-status-row total">
+              <span>ความพร้อม</span>
+              <strong id="status-ready" class="status-value">0/3</strong>
+            </div>
+          </section>
+
+          <label class="file-field">
+            <span>1) ไฟล์ Config ของ Switch แบบ GUI</span>
+            <div class="drop-zone" data-input-id="fdo-file" tabindex="0" role="button" aria-label="เลือกหรือวางไฟล์ Config/FDO">
+              <input id="fdo-file" class="file-input-native" type="file" name="fdo_file" accept=".log,.txt,.cfg,.conf" required />
+              <div class="drop-zone-main">
+                <button type="button" class="pick-file-btn" data-pick-for="fdo-file">เลือกไฟล์</button>
+                <strong id="fdo-file-selected" class="drop-zone-filename">ยังไม่เลือกไฟล์</strong>
+              </div>
+              <div class="drop-zone-hint">ลากไฟล์มาวางที่นี่ หรือกดปุ่มเลือกไฟล์</div>
+            </div>
+            <small class="field-hint">รองรับไฟล์ .log .txt .cfg .conf</small>
+          </label>
+
+          <label class="file-field">
+            <span>2) ไฟล์ APIC</span>
+            <div class="drop-zone" data-input-id="apic-file" tabindex="0" role="button" aria-label="เลือกหรือวางไฟล์ APIC">
+              <input id="apic-file" class="file-input-native" type="file" name="apic_file" accept=".log,.txt,.cfg,.conf" required />
+              <div class="drop-zone-main">
+                <button type="button" class="pick-file-btn" data-pick-for="apic-file">เลือกไฟล์</button>
+                <strong id="apic-file-selected" class="drop-zone-filename">ยังไม่เลือกไฟล์</strong>
+              </div>
+              <div class="drop-zone-hint">ลากไฟล์มาวางที่นี่ หรือกดปุ่มเลือกไฟล์</div>
+            </div>
+            <small class="field-hint">รองรับไฟล์ .log .txt .cfg .conf</small>
+          </label>
+
+          <label class="file-field">
+            <span>3) ไฟล์ Show Log</span>
+            <div class="drop-zone" data-input-id="image-file" tabindex="0" role="button" aria-label="เลือกหรือวางไฟล์ Show Log">
+              <input id="image-file" class="file-input-native" type="file" name="image_file" accept=".png,.jpg,.jpeg,.bmp,.gif,.webp" required />
+              <div class="drop-zone-main">
+                <button type="button" class="pick-file-btn" data-pick-for="image-file">เลือกไฟล์</button>
+                <strong id="image-file-selected" class="drop-zone-filename">ยังไม่เลือกไฟล์</strong>
+              </div>
+              <div class="drop-zone-hint">ลากไฟล์มาวางที่นี่ หรือกดปุ่มเลือกไฟล์</div>
+            </div>
+            <small class="field-hint">รองรับไฟล์ .png .jpg .jpeg .bmp .gif .webp</small>
+          </label>
+
+          <div class="button-row">
+            <button id="submit-pdf" type="submit" data-format="pdf">สร้างและดาวน์โหลด PDF</button>
+            <button id="submit-docx" type="submit" data-format="docx" class="secondary">สร้างและดาวน์โหลด Word (.docx)</button>
+            <button id="btn-reset" type="button" class="ghost">ล้างค่าทั้งหมด</button>
+          </div>
+
+          <p class="output-preview">ชื่อไฟล์ผลลัพธ์: <strong id="output-preview-name">output.pdf</strong></p>
+
+          <section id="progress-wrap" class="progress-wrap" hidden>
+            <div id="progress-label" class="progress-label">กำลังสร้าง PDF...</div>
+            <div class="progress-track">
+              <div id="progress-bar" class="progress-bar indeterminate"></div>
+            </div>
+          </section>
+
+          <section id="validation-wrap" class="validation-wrap" hidden>
+            <div class="validation-title">รายงานการตรวจสอบ / Validation</div>
+            <div id="validation-report" class="validation-report"></div>
+          </section>
+        </form>
+
+        <section class="notes">
+          <h2>ข้อควรเตรียมไฟล์</h2>
+          <ol>
+            <li>ไฟล์ Config ควรมีลำดับคำสั่ง show environment ครบถ้วน</li>
+            <li>ไฟล์ APIC ต้องอ่านได้</li>
+            <li>ไฟล์ Config ต้องเป็นข้อความ</li>
+            <li>ระบบจะตรวจส่วนแสดงภาพท้ายเอกสาร: Show log</li>
+          </ol>
+          <p>ระบบจะใช้ชื่อไฟล์จากหมายเลขอุปกรณ์ในไฟล์ Config</p>
+        </section>
+      </section>
+    </main>
+    <script>
+      (() => {
+        const form = document.getElementById("generate-form");
+        const submitButtons = Array.from(form.querySelectorAll("button[data-format]"));
+        const formatInput = document.getElementById("output-format");
+        const progressWrap = document.getElementById("progress-wrap");
+        const progressLabel = document.getElementById("progress-label");
+        const progressBar = document.getElementById("progress-bar");
+        const validationWrap = document.getElementById("validation-wrap");
+        const validationReport = document.getElementById("validation-report");
+        const fdoFileInput = document.getElementById("fdo-file");
+        const apicFileInput = document.getElementById("apic-file");
+        const imageFileInput = document.getElementById("image-file");
+        const statusFdo = document.getElementById("status-fdo");
+        const statusApic = document.getElementById("status-apic");
+        const statusImage = document.getElementById("status-image");
+        const statusReady = document.getElementById("status-ready");
+        const outputPreviewName = document.getElementById("output-preview-name");
+        const resetButton = document.getElementById("btn-reset");
+        const dropZones = Array.from(document.querySelectorAll(".drop-zone"));
+        const fdoSelectedName = document.getElementById("fdo-file-selected");
+        const apicSelectedName = document.getElementById("apic-file-selected");
+        const imageSelectedName = document.getElementById("image-file-selected");
+        const clockCustomMode = document.getElementById("clock-custom-mode");
+        const clockCustomFields = document.getElementById("clock-custom-fields");
+        const clockDate = document.getElementById("clock-date");
+        const clockDateNative = document.getElementById("clock-date-native");
+        const clockDatePickerBtn = document.getElementById("clock-date-picker-btn");
+        const clockStart = document.getElementById("clock-start");
+        const clockEnd = document.getElementById("clock-end");
+        const clockStartHour = document.getElementById("clock-start-hour");
+        const clockStartMinute = document.getElementById("clock-start-minute");
+        const clockStartSecond = document.getElementById("clock-start-second");
+        const clockEndHour = document.getElementById("clock-end-hour");
+        const clockEndMinute = document.getElementById("clock-end-minute");
+        const clockEndSecond = document.getElementById("clock-end-second");
+
+        const pad2 = (n) => String(n).padStart(2, "0");
+        const DATE_SLOT_POSITIONS = [0, 1, 3, 4, 6, 7, 8, 9];
+
+        const formatDateYmd = (dateObj) => {
+          const d = dateObj instanceof Date ? dateObj : new Date();
+          return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+        };
+
+        const formatDateDmy = (dateObj) => {
+          const d = dateObj instanceof Date ? dateObj : new Date();
+          return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;
+        };
+
+        const formatDatePartsToDmy = (parts) => {
+          if (!parts) return "";
+          return `${pad2(parts.day)}/${pad2(parts.month)}/${parts.year}`;
+        };
+
+        const parseDateInputToYmd = (value) => {
+          const raw = String(value || "").trim();
+          if (!raw) return null;
+
+          const validate = (year, month, day) => {
+            if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
+            if (year < 1900 || year > 9999) return null;
+            if (month < 1 || month > 12) return null;
+            if (day < 1 || day > 31) return null;
+            const check = new Date(Date.UTC(year, month - 1, day));
+            if (
+              check.getUTCFullYear() !== year ||
+              check.getUTCMonth() !== month - 1 ||
+              check.getUTCDate() !== day
+            ) {
+              return null;
+            }
+            return { year, month, day };
+          };
+
+          let m = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+          if (m) {
+            return validate(Number(m[3]), Number(m[2]), Number(m[1]));
+          }
+
+          m = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+          if (m) {
+            return validate(Number(m[1]), Number(m[2]), Number(m[3]));
+          }
+
+          return null;
+        };
+
+        const isLeapYear = (year) => Number.isInteger(year) && year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+
+        const getMaxDayByMonth = (month, year) => {
+          if (!Number.isInteger(month) || month < 1 || month > 12) return 31;
+          if (month === 2) {
+            if (Number.isInteger(year)) return isLeapYear(year) ? 29 : 28;
+            return 29;
+          }
+          if (month === 4 || month === 6 || month === 9 || month === 11) return 30;
+          return 31;
+        };
+
+        const clampNumber = (value, min, max) => Math.min(max, Math.max(min, value));
+
+        const findDateSlotAtOrAfter = (index) => {
+          for (const pos of DATE_SLOT_POSITIONS) {
+            if (pos >= index) return pos;
+          }
+          return null;
+        };
+
+        const findDateSlotBefore = (index) => {
+          for (let i = DATE_SLOT_POSITIONS.length - 1; i >= 0; i -= 1) {
+            if (DATE_SLOT_POSITIONS[i] < index) return DATE_SLOT_POSITIONS[i];
+          }
+          return null;
+        };
+
+        const clearDateSlotsInRange = (chars, start, end) => {
+          for (const pos of DATE_SLOT_POSITIONS) {
+            if (pos >= start && pos < end) {
+              chars[pos] = "_";
+            }
+          }
+        };
+
+        const normalizeDateTextInput = (value) => {
+          const raw = String(value || "");
+          const chars = "__/__/____".split("");
+
+          if (raw.length >= 10 && raw[2] === "/" && raw[5] === "/") {
+            for (const pos of DATE_SLOT_POSITIONS) {
+              const ch = raw[pos];
+              chars[pos] = /\d/.test(ch || "") ? ch : "_";
+            }
+          } else {
+            const digits = raw.replace(/\D+/g, "").slice(0, 8);
+            for (let i = 0; i < digits.length; i += 1) {
+              chars[DATE_SLOT_POSITIONS[i]] = digits[i];
+            }
+          }
+
+          const mmRaw = `${chars[3]}${chars[4]}`;
+          let monthForCalc = null;
+          if (/^\d\d$/.test(mmRaw)) {
+            const m2 = clampNumber(Number(mmRaw), 1, 12);
+            const mm = pad2(m2);
+            chars[3] = mm[0];
+            chars[4] = mm[1];
+            monthForCalc = m2;
+          } else if (/^\d_$/.test(mmRaw)) {
+            const m1 = Number(chars[3]);
+            monthForCalc = m1 >= 1 && m1 <= 9 ? m1 : null;
+          }
+
+          const yyyyRaw = `${chars[6]}${chars[7]}${chars[8]}${chars[9]}`;
+          const yearMaybe = /^\d{4}$/.test(yyyyRaw) ? Number(yyyyRaw) : null;
+          const maxDay = getMaxDayByMonth(monthForCalc, yearMaybe);
+          const ddRaw = `${chars[0]}${chars[1]}`;
+          if (/^\d\d$/.test(ddRaw)) {
+            const d2 = clampNumber(Number(ddRaw), 1, maxDay);
+            const dd = pad2(d2);
+            chars[0] = dd[0];
+            chars[1] = dd[1];
+          }
+
+          return chars.join("");
+        };
+
+        const countDigitsBeforeIndex = (text, index) => {
+          const src = String(text || "");
+          const end = Math.max(0, Math.min(Number(index) || 0, src.length));
+          let count = 0;
+          for (let i = 0; i < end; i += 1) {
+            if (/\d/.test(src[i])) count += 1;
+          }
+          return count;
+        };
+
+        const caretIndexForDigitCount = (text, digitCount) => {
+          const src = String(text || "");
+          const target = Math.max(0, Number(digitCount) || 0);
+          if (target === 0) return 0;
+          let seen = 0;
+          for (let i = 0; i < src.length; i += 1) {
+            if (/\d/.test(src[i])) {
+              seen += 1;
+              if (seen >= target) {
+                return i + 1;
+              }
+            }
+          }
+          return src.length;
+        };
+
+        const syncNativeDateFromText = () => {
+          if (!clockDateNative || !clockDate) return false;
+          const parsed = parseDateInputToYmd(clockDate.value);
+          if (!parsed) {
+            clockDateNative.value = "";
+            return false;
+          }
+          clockDateNative.value = `${parsed.year}-${pad2(parsed.month)}-${pad2(parsed.day)}`;
+          clockDate.value = formatDatePartsToDmy(parsed);
+          return true;
+        };
+
+        const syncTextDateFromNative = () => {
+          if (!clockDateNative || !clockDate) return false;
+          const parsed = parseDateInputToYmd(clockDateNative.value);
+          if (!parsed) return false;
+          clockDate.value = formatDatePartsToDmy(parsed);
+          return true;
+        };
+
+        const setClockDateToToday = () => {
+          const now = new Date();
+          if (clockDate) {
+            clockDate.value = formatDateDmy(now);
+          }
+          if (clockDateNative) {
+            clockDateNative.value = formatDateYmd(now);
+          }
+        };
+
+        const bindClockDatePickerUi = () => {
+          clockDatePickerBtn?.addEventListener("click", () => {
+            if (!syncNativeDateFromText() && clockDateNative) {
+              clockDateNative.value = "";
+            }
+            if (!clockDateNative) return;
+            if (typeof clockDateNative.showPicker === "function") {
+              clockDateNative.showPicker();
+            } else {
+              clockDateNative.focus();
+              clockDateNative.click();
+            }
+          });
+
+          clockDateNative?.addEventListener("input", () => {
+            syncTextDateFromNative();
+          });
+
+          clockDateNative?.addEventListener("change", () => {
+            syncTextDateFromNative();
+          });
+
+          clockDate?.addEventListener("keydown", (event) => {
+            if (event.ctrlKey || event.metaKey || event.altKey) return;
+            const key = event.key;
+            const start = clockDate.selectionStart ?? 0;
+            const end = clockDate.selectionEnd ?? start;
+            const chars = normalizeDateTextInput(clockDate.value).split("");
+            const applyValue = (caretPos) => {
+              clockDate.value = chars.join("");
+              const c = Math.max(0, Math.min(Number(caretPos) || 0, clockDate.value.length));
+              clockDate.setSelectionRange(c, c);
+              syncNativeDateFromText();
+            };
+
+            if (
+              key === "Tab" ||
+              key === "ArrowLeft" ||
+              key === "ArrowRight" ||
+              key === "ArrowUp" ||
+              key === "ArrowDown" ||
+              key === "Home" ||
+              key === "End" ||
+              key === "Enter"
+            ) {
+              return;
+            }
+
+            if (key === "Backspace") {
+              event.preventDefault();
+              if (end > start) {
+                clearDateSlotsInRange(chars, start, end);
+                applyValue(start);
+                return;
+              }
+              const pos = findDateSlotBefore(start);
+              if (pos === null) return;
+              chars[pos] = "_";
+              applyValue(pos);
+              return;
+            }
+
+            if (key === "Delete") {
+              event.preventDefault();
+              if (end > start) {
+                clearDateSlotsInRange(chars, start, end);
+                applyValue(start);
+                return;
+              }
+              const pos = findDateSlotAtOrAfter(start);
+              if (pos === null) return;
+              chars[pos] = "_";
+              applyValue(pos);
+              return;
+            }
+
+            if (/^\d$/.test(key)) {
+              event.preventDefault();
+              if (end > start) {
+                clearDateSlotsInRange(chars, start, end);
+              }
+              let pos = findDateSlotAtOrAfter(start);
+              if (pos === null) {
+                pos = DATE_SLOT_POSITIONS[DATE_SLOT_POSITIONS.length - 1];
+              }
+              chars[pos] = key;
+              const adjusted = normalizeDateTextInput(chars.join("")).split("");
+              for (let i = 0; i < adjusted.length; i += 1) {
+                chars[i] = adjusted[i];
+              }
+              const next = findDateSlotAtOrAfter(pos + 1);
+              applyValue(next === null ? pos + 1 : next);
+              return;
+            }
+
+            event.preventDefault();
+          });
+
+          clockDate?.addEventListener("input", () => {
+            const beforeValue = clockDate.value;
+            const caretBefore = clockDate.selectionStart ?? beforeValue.length;
+            const digitCountBefore = countDigitsBeforeIndex(beforeValue, caretBefore);
+            const normalized = normalizeDateTextInput(beforeValue);
+            if (beforeValue !== normalized) {
+              clockDate.value = normalized;
+              const nextCaret = caretIndexForDigitCount(normalized, digitCountBefore);
+              clockDate.setSelectionRange(nextCaret, nextCaret);
+            }
+            syncNativeDateFromText();
+          });
+
+          clockDate?.addEventListener("blur", () => {
+            syncNativeDateFromText();
+          });
+        };
+
+        const validateCustomClockDateOrNotify = () => {
+          if (!clockCustomMode?.checked) return true;
+          const parsed = parseDateInputToYmd(clockDate?.value);
+          if (parsed) {
+            syncNativeDateFromText();
+            return true;
+          }
+          window.alert("กรุณากรอกวันที่เป็น วัน/เดือน/ปี และกรอกได้เฉพาะตัวเลข เช่น 25/02/2026");
+          clockDate?.focus();
+          return false;
+        };
+
+        const fillNumberOptions = (select, max) => {
+          if (!select) return;
+          select.innerHTML = "";
+          for (let i = 0; i <= max; i += 1) {
+            const value = pad2(i);
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = value;
+            select.appendChild(option);
+          }
+        };
+
+        const setTimeTriplet = (hourEl, minuteEl, secondEl, hms) => {
+          const parts = (hms || "00:00:00").split(":");
+          const h = pad2(Number(parts[0] || 0));
+          const m = pad2(Number(parts[1] || 0));
+          const s = pad2(Number(parts[2] || 0));
+          if (hourEl) hourEl.value = h;
+          if (minuteEl) minuteEl.value = m;
+          if (secondEl) secondEl.value = s;
+        };
+
+        const getTimeTriplet = (hourEl, minuteEl, secondEl) => {
+          const h = hourEl?.value || "00";
+          const m = minuteEl?.value || "00";
+          const s = secondEl?.value || "00";
+          return `${h}:${m}:${s}`;
+        };
+
+        const toSeconds = (hms) => {
+          const [h, m, s] = (hms || "00:00:00").split(":").map((v) => Number(v || 0));
+          return (h * 3600) + (m * 60) + s;
+        };
+
+        const syncHiddenClockValues = () => {
+          if (clockStart) {
+            clockStart.value = getTimeTriplet(clockStartHour, clockStartMinute, clockStartSecond);
+          }
+          if (clockEnd) {
+            clockEnd.value = getTimeTriplet(clockEndHour, clockEndMinute, clockEndSecond);
+          }
+        };
+
+        const clampClockRange = () => {
+          const startValue = getTimeTriplet(clockStartHour, clockStartMinute, clockStartSecond);
+          const endValue = getTimeTriplet(clockEndHour, clockEndMinute, clockEndSecond);
+          if (toSeconds(endValue) < toSeconds(startValue)) {
+            setTimeTriplet(clockEndHour, clockEndMinute, clockEndSecond, startValue);
+          }
+          syncHiddenClockValues();
+        };
+
+        if (clockCustomMode && clockCustomFields) {
+          clockCustomMode.checked = false;
+          clockCustomFields.hidden = true;
+          const refreshClockConfigUi = () => {
+            clockCustomFields.hidden = !clockCustomMode.checked;
+            if (clockCustomMode.checked && !clockDate?.value) {
+              setClockDateToToday();
+            } else if (clockCustomMode.checked) {
+              syncNativeDateFromText();
+            }
+          };
+          clockCustomMode.addEventListener("change", refreshClockConfigUi);
+          refreshClockConfigUi();
+        }
+        bindClockDatePickerUi();
+        setClockDateToToday();
+
+        fillNumberOptions(clockStartHour, 23);
+        fillNumberOptions(clockEndHour, 23);
+        fillNumberOptions(clockStartMinute, 59);
+        fillNumberOptions(clockEndMinute, 59);
+        fillNumberOptions(clockStartSecond, 59);
+        fillNumberOptions(clockEndSecond, 59);
+        setTimeTriplet(clockStartHour, clockStartMinute, clockStartSecond, clockStart?.value || "08:00:00");
+        setTimeTriplet(clockEndHour, clockEndMinute, clockEndSecond, clockEnd?.value || "18:00:00");
+        clampClockRange();
+
+        [clockStartHour, clockStartMinute, clockStartSecond, clockEndHour, clockEndMinute, clockEndSecond].forEach(
+          (el) => el?.addEventListener("change", clampClockRange)
+        );
+
+        const setProgress = (pct) => {
+          const safePct = Math.max(0, Math.min(100, pct));
+          progressBar.style.width = `${safePct}%`;
+        };
+
+        const getFilename = (disposition, fallback) => {
+          if (!disposition) return fallback;
+          const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+          if (utf8Match?.[1]) return decodeURIComponent(utf8Match[1]);
+          const plainMatch = disposition.match(/filename=\"?([^\";]+)\"?/i);
+          return plainMatch?.[1] || fallback;
+        };
+
+        const downloadBlob = (blob, filename) => {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1200);
+        };
+
+        const escapeHtml = (value) =>
+          String(value || "")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#039;");
+
+        const renderLineWithStatusBadges = (line) => {
+          const regex = /\[(ผ่าน|ไม่ผ่าน)\]/g;
+          const parts = [];
+          let lastIndex = 0;
+          let match;
+          while ((match = regex.exec(line)) !== null) {
+            parts.push(escapeHtml(line.slice(lastIndex, match.index)));
+            const isPass = match[1] === "ผ่าน";
+            parts.push(
+              `<span class="vr-inline-badge ${isPass ? "pass" : "fail"}">${match[1]}</span>`
+            );
+            lastIndex = match.index + match[0].length;
+          }
+          parts.push(escapeHtml(line.slice(lastIndex)));
+          return parts.join("");
+        };
+
+        const renderValidationReport = (text) => {
+          if (!validationReport) return;
+          const lines = String(text || "").split(/\r?\n/);
+          const html = [];
+
+          lines.forEach((rawLine) => {
+            const line = rawLine.trimEnd();
+            const trimmed = line.trim();
+            if (!trimmed) {
+              html.push('<div class="vr-gap" aria-hidden="true"></div>');
+              return;
+            }
+
+            if (trimmed.startsWith("ผลการตรวจสอบ:")) {
+              const isFail = trimmed.includes("ไม่ผ่าน");
+              const statusText = isFail ? "ไม่ผ่าน" : "ผ่าน";
+              html.push(
+                `<div class="vr-result ${isFail ? "fail" : "pass"}">` +
+                  `<span class="vr-result-label">ผลการตรวจสอบ</span>` +
+                  `<span class="vr-badge">${statusText}</span>` +
+                `</div>`
+              );
+              return;
+            }
+
+            if (!trimmed.startsWith("-") && trimmed.endsWith(":")) {
+              html.push(`<h3 class="vr-section-title">${escapeHtml(trimmed.slice(0, -1))}</h3>`);
+              return;
+            }
+
+            if (trimmed.startsWith("- ")) {
+              const content = trimmed.slice(2);
+              const itemClass = content.includes("ไม่ผ่าน") || content.includes("ขาด") || content.includes("เกิน")
+                ? "bad"
+                : content.includes("ผ่าน")
+                  ? "good"
+                  : "normal";
+              html.push(
+                `<div class="vr-item ${itemClass}">` +
+                  `<span class="vr-bullet">•</span>` +
+                  `<span class="vr-text">${renderLineWithStatusBadges(content)}</span>` +
+                `</div>`
+              );
+              return;
+            }
+
+            html.push(`<div class="vr-note">${escapeHtml(trimmed)}</div>`);
+          });
+
+          validationReport.innerHTML = html.join("");
+        };
+
+        const showValidationReport = (text) => {
+          if (!validationWrap || !validationReport) return;
+          if (!text) {
+            validationReport.innerHTML = "";
+            validationWrap.hidden = true;
+            return;
+          }
+          renderValidationReport(text);
+          validationWrap.hidden = false;
+        };
+
+        const setFileStatus = (el, fileName) => {
+          if (!el) return;
+          if (fileName) {
+            el.textContent = fileName;
+            el.classList.add("ok");
+          } else {
+            el.textContent = "ยังไม่เลือกไฟล์";
+            el.classList.remove("ok");
+          }
+        };
+
+        const setDropZoneFilename = (inputEl, nameEl) => {
+          if (!inputEl || !nameEl) return;
+          const fileName = inputEl.files?.[0]?.name || "";
+          const zone = inputEl.closest(".drop-zone");
+          nameEl.textContent = fileName || "ยังไม่เลือกไฟล์";
+          if (zone) {
+            zone.classList.toggle("filled", !!fileName);
+          }
+        };
+
+        const assignSingleFileToInput = (inputEl, file) => {
+          if (!inputEl || !file) return;
+          try {
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            inputEl.files = dt.files;
+            inputEl.dispatchEvent(new Event("change", { bubbles: true }));
+          } catch (_err) {
+            // Browser may block programmatic file assignment.
+          }
+        };
+
+        const buildOutputPreviewName = () => {
+          const extension = (formatInput.value || "pdf").toLowerCase() === "docx" ? "docx" : "pdf";
+          const sourceName = fdoFileInput?.files?.[0]?.name || "output";
+          const stem = sourceName.replace(/\.[^.]+$/, "") || "output";
+          return `${stem}.${extension}`;
+        };
+
+        const updateUploadStatus = () => {
+          const fdoName = fdoFileInput?.files?.[0]?.name || "";
+          const apicName = apicFileInput?.files?.[0]?.name || "";
+          const imageName = imageFileInput?.files?.[0]?.name || "";
+          const readyCount = [fdoName, apicName, imageName].filter(Boolean).length;
+
+          setFileStatus(statusFdo, fdoName);
+          setFileStatus(statusApic, apicName);
+          setFileStatus(statusImage, imageName);
+          setDropZoneFilename(fdoFileInput, fdoSelectedName);
+          setDropZoneFilename(apicFileInput, apicSelectedName);
+          setDropZoneFilename(imageFileInput, imageSelectedName);
+
+          if (statusReady) {
+            statusReady.textContent = `${readyCount}/3`;
+            statusReady.classList.toggle("ok", readyCount === 3);
+          }
+          if (outputPreviewName) {
+            outputPreviewName.textContent = buildOutputPreviewName();
+          }
+
+          submitButtons.forEach((btn) => {
+            btn.disabled = readyCount < 3;
+          });
+        };
+
+        const resetUi = () => {
+          progressWrap.hidden = true;
+          progressBar.classList.add("indeterminate");
+          progressBar.style.width = "35%";
+          progressLabel.textContent = "พร้อมสร้างไฟล์...";
+          updateUploadStatus();
+        };
+
+        [fdoFileInput, apicFileInput, imageFileInput].forEach((el) => {
+          el?.addEventListener("change", updateUploadStatus);
+        });
+
+        dropZones.forEach((zone) => {
+          const inputId = zone.getAttribute("data-input-id");
+          const inputEl = inputId ? document.getElementById(inputId) : null;
+          if (!inputEl) return;
+
+          const activatePicker = () => {
+            try {
+              if (typeof inputEl.showPicker === "function") {
+                inputEl.showPicker();
+                return;
+              }
+            } catch (_err) {
+              // fallback to click below
+            }
+            inputEl.click();
+          };
+          zone.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            activatePicker();
+          });
+          zone.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              activatePicker();
+            }
+          });
+          zone.addEventListener("dragover", (event) => {
+            event.preventDefault();
+            zone.classList.add("dragover");
+          });
+          zone.addEventListener("dragleave", () => {
+            zone.classList.remove("dragover");
+          });
+          zone.addEventListener("drop", (event) => {
+            event.preventDefault();
+            zone.classList.remove("dragover");
+            const file = event.dataTransfer?.files?.[0];
+            if (file) {
+              assignSingleFileToInput(inputEl, file);
+            }
+          });
+        });
+
+        submitButtons.forEach((button) => {
+          button.addEventListener("click", () => {
+            formatInput.value = button.dataset.format || "pdf";
+            updateUploadStatus();
+          });
+        });
+
+        resetButton?.addEventListener("click", () => {
+          form.reset();
+          if (clockCustomMode && clockCustomFields) {
+            clockCustomMode.checked = false;
+            clockCustomFields.hidden = true;
+          }
+          setClockDateToToday();
+          setTimeTriplet(clockStartHour, clockStartMinute, clockStartSecond, "08:00:00");
+          setTimeTriplet(clockEndHour, clockEndMinute, clockEndSecond, "18:00:00");
+          clampClockRange();
+          showValidationReport("");
+          updateUploadStatus();
+        });
+
+        updateUploadStatus();
+
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          if (!validateCustomClockDateOrNotify()) {
+            return;
+          }
+
+          const formData = new FormData(form);
+          const outputFormat = (formData.get("output_format") || "pdf").toString().toLowerCase();
+          const extension = outputFormat === "docx" ? "docx" : "pdf";
+          const fdoName = formData.get("fdo_file")?.name || "output";
+          const fallbackName = `${fdoName.replace(/\.[^.]+$/, "") || "output"}.${extension}`;
+
+          submitButtons.forEach((btn) => {
+            btn.disabled = true;
+          });
+          if (validationWrap && validationReport) {
+            validationWrap.hidden = true;
+            validationReport.textContent = "";
+          }
+          progressWrap.hidden = false;
+          progressBar.classList.add("indeterminate");
+          progressBar.style.width = "35%";
+          progressLabel.textContent = outputFormat === "docx" ? "กำลังสร้าง Word..." : "กำลังสร้าง PDF...";
+
+          try {
+            const response = await fetch(form.action, {
+              method: "POST",
+              body: formData,
+            });
+
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status}`);
+            }
+
+            const contentType = response.headers.get("content-type") || "";
+            const isPdf = contentType.includes("application/pdf");
+            const isDocx = contentType.includes("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+            if (!isPdf && !isDocx) {
+              throw new Error("รูปแบบไฟล์ตอบกลับไม่ใช่ PDF/DOCX ที่รองรับ");
+            }
+
+            const contentLength = parseInt(response.headers.get("content-length") || "0", 10);
+            const filename = getFilename(response.headers.get("content-disposition"), fallbackName);
+            const validationReportId = response.headers.get("x-validation-report-id");
+            if (validationReportId) {
+              try {
+                const reportResp = await fetch(`/validation-report/${validationReportId}`);
+                if (reportResp.ok) {
+                  showValidationReport(await reportResp.text());
+                }
+              } catch (_err) {
+                // ignore report fetch error and continue download
+              }
+            } else {
+              const encodedValidation = response.headers.get("x-validation-report");
+              if (encodedValidation) {
+                try {
+                  showValidationReport(decodeURIComponent(encodedValidation));
+                } catch (_err) {
+                  showValidationReport(encodedValidation);
+                }
+              }
+            }
+            const reader = response.body?.getReader();
+
+            if (reader) {
+              const chunks = [];
+              let received = 0;
+              progressBar.classList.remove("indeterminate");
+              setProgress(0);
+              progressLabel.textContent = "กำลังดาวน์โหลด...";
+
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                chunks.push(value);
+                received += value.length;
+
+                if (contentLength > 0) {
+                  const pct = Math.round((received / contentLength) * 100);
+                  setProgress(pct);
+                  progressLabel.textContent = `กำลังดาวน์โหลด... ${pct}%`;
+                } else {
+                  const pseudo = Math.min(95, 10 + Math.floor(received / 100000));
+                  setProgress(pseudo);
+                }
+              }
+
+              const blobType = isDocx
+                ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                : "application/pdf";
+              const blob = new Blob(chunks, { type: blobType });
+              setProgress(100);
+              progressLabel.textContent = "เสร็จสิ้น";
+              downloadBlob(blob, filename);
+            } else {
+              const blob = await response.blob();
+              progressBar.classList.remove("indeterminate");
+              setProgress(100);
+              progressLabel.textContent = "เสร็จสิ้น";
+              downloadBlob(blob, filename);
+            }
+          } catch (error) {
+            progressBar.classList.remove("indeterminate");
+            setProgress(100);
+            progressLabel.textContent = "ล้มเหลว กรุณาลองใหม่อีกครั้ง";
+            console.error(error);
+            setTimeout(() => {
+              alert("สร้างไฟล์ไม่สำเร็จ กรุณาตรวจสอบข้อมูลแล้วลองใหม่อีกครั้ง");
+            }, 10);
+          } finally {
+            setTimeout(resetUi, 1200);
+          }
+        });
+      })();
+    </script>
+  </body>
+</html>
+

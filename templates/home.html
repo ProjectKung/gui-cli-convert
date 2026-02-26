@@ -1,0 +1,43 @@
+﻿<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Switch Converter Launcher</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='app-icon.svg', v=app_build) }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='site.css', v=app_build) }}" />
+  </head>
+  <body>
+    <main class="layout">
+      <section class="panel home-panel">
+        <header class="home-hero">
+          <img
+            class="home-logo"
+            src="{{ url_for('static', filename='app-icon.svg', v=app_build) }}"
+            alt="App icon"
+            width="84"
+            height="84"
+          />
+          <p class="eyebrow">Switch Converter</p>
+          <h1>เลือกโหมดการทำงานของระบบแปลงไฟล์</h1>
+          <p class="subtitle">รองรับโหมด GUI และ CLI ในหน้าจอเดียว</p>
+        </header>
+
+        <nav class="home-entry-grid" aria-label="เลือกโหมดการใช้งาน">
+          <a class="home-entry-card gui" href="{{ url_for('index') }}">
+            <span class="entry-chip">GUI</span>
+            <strong>เข้าโหมด GUI</strong>
+            <small>เหมาะกับการอัปโหลดไฟล์แบบลากวางและกดดาวน์โหลด</small>
+          </a>
+          <a class="home-entry-card cli" href="{{ url_for('cli_home') }}">
+            <span class="entry-chip">CLI</span>
+            <strong>เข้าโหมด CLI</strong>
+            <small>เหมาะกับการทำงานแบบรวดเร็วและตรวจผลละเอียด</small>
+          </a>
+        </nav>
+
+        <p class="build">เวอร์ชัน Build: {{ app_build }}</p>
+      </section>
+    </main>
+  </body>
+</html>
