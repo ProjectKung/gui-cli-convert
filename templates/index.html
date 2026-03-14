@@ -752,6 +752,13 @@
           validationWrap.hidden = false;
         };
 
+        const getValidationPassStatus = (text) => {
+          const src = String(text || "");
+          const match = src.match(/ผลการตรวจสอบ:\s*(ผ่าน|ไม่ผ่าน)/);
+          if (!match) return null;
+          return match[1] === "ผ่าน";
+        };
+
         const setFileStatus = (el, fileName) => {
           if (!el) return;
           if (fileName) {
@@ -941,11 +948,13 @@
             const contentLength = parseInt(response.headers.get("content-length") || "0", 10);
             const filename = getFilename(response.headers.get("content-disposition"), fallbackName);
             const validationReportId = response.headers.get("x-validation-report-id");
+            let validationText = "";
             if (validationReportId) {
               try {
                 const reportResp = await fetch(`/validation-report/${validationReportId}`);
                 if (reportResp.ok) {
-                  showValidationReport(await reportResp.text());
+                  validationText = await reportResp.text();
+                  showValidationReport(validationText);
                 }
               } catch (_err) {
                 // ignore report fetch error and continue download
@@ -954,12 +963,33 @@
               const encodedValidation = response.headers.get("x-validation-report");
               if (encodedValidation) {
                 try {
-                  showValidationReport(decodeURIComponent(encodedValidation));
+                  validationText = decodeURIComponent(encodedValidation);
+                  showValidationReport(validationText);
                 } catch (_err) {
-                  showValidationReport(encodedValidation);
+                  validationText = encodedValidation;
+                  showValidationReport(validationText);
                 }
               }
             }
+
+            const validationPass = getValidationPassStatus(validationText);
+            if (validationPass === false) {
+              if (response.body) {
+                try {
+                  await response.body.cancel();
+                } catch (_err) {
+                  // ignore stream cancel failure
+                }
+              }
+              progressBar.classList.remove("indeterminate");
+              setProgress(100);
+              progressLabel.textContent = "ไม่ผ่านเงื่อนไข จึงไม่อนุญาตให้ดาวน์โหลด";
+              setTimeout(() => {
+                alert("ผลการตรวจสอบไม่ผ่าน จึงไม่อนุญาตให้ดาวน์โหลด");
+              }, 10);
+              return;
+            }
+
             const reader = response.body?.getReader();
 
             if (reader) {
@@ -1015,4 +1045,3 @@
     </script>
   </body>
 </html>
-

@@ -38,7 +38,7 @@ SHOW_RUNNING_CONFIG_PATTERN = re.compile(
 SHOW_CLOCK_COMMAND_PATTERN = re.compile(r"#\s*(?:sh|sho|show)\s+(?:clock|clo)\b", re.IGNORECASE)
 CLEAR_WORD_PATTERN = re.compile(r"\bclear\b", re.IGNORECASE)
 TIME_LINE_PATTERN = re.compile(
-    r"^(\s*\*?\s*)(\d{1,2}):(\d{2}):(\d{2})(?:\.(\d+))?\s+(\S+)\s+([A-Za-z]{3})\s+([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})\s*$"
+    r"^(\s*(?:[.*]\s*)*)(\d{1,2}):(\d{2}):(\d{2})(?:\.(\d+))?\s+(\S+)\s+([A-Za-z]{3})\s+([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})\s*$"
 )
 INTERFACE_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9/._:-]*$")
 INTERFACE_ERRORS_FIELD_PATTERN = re.compile(r"(\s+)(\S+)")

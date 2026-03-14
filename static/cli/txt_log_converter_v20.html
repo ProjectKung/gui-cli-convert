@@ -844,11 +844,11 @@
     return days[new Date(Date.UTC(y,m,d)).getUTCDay()];
   }
 
-  // ---------- Time line parse/format (preserve prefix incl. '*') ----------
+  // ---------- Time line parse/format (preserve prefix incl. '*' / '.') ----------
   function parseTimeLine(line){
-    // Example: "*08:12:21.902 UTC Tue Feb 3 2026"
-    // Capture prefix (spaces + optional *), then time, optional ms, tz token, DOW, MON, DAY, YEAR
-    const re = /^(\s*\*?\s*)(\d{1,2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?\s+(\S+)\s+([A-Za-z]{3})\s+([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})\s*$/;
+    // Example: "*08:12:21.902 UTC Tue Feb 3 2026" or ".14:36:44.262 UTC+7 Fri Mar 13 2026"
+    // Capture prefix (spaces + optional '*' / '.' markers), then time, optional ms, tz token, DOW, MON, DAY, YEAR
+    const re = /^(\s*(?:[.*]\s*)*)(\d{1,2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?\s+(\S+)\s+([A-Za-z]{3})\s+([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})\s*$/;
     const m = line.match(re);
     if(!m) return null;
     const prefix = m[1] || "";
@@ -1367,15 +1367,53 @@
     showIntCrc: /#\s*(?:sh|sho|show)\s+int(?:e(?:r(?:f(?:a(?:c(?:e(?:s)?)?)?)?)?)?)?\s*\|\s*i(?:n(?:c(?:l(?:u(?:d(?:e)?)?)?)?)?)?\s+crc\b/i,
   };
 
-  function detectRelevantCommand(line){
-    const txt = String(line || "");
-    const promptMatch = txt.match(/^\s*[^\s#]+#(.*)$/);
-    if(!promptMatch) return null;
-    const display = String(promptMatch[1] || "")
+  function normalizeCommandDisplay(text){
+    return String(text || "")
       .trim()
       .replace(/\s+/g, " ")
       .replace(/\s*\|\s*/g, " | ");
-    if(!display) return null;
+  }
+
+  function parsePromptCommandLine(line){
+    const txt = String(line || "");
+    const hashPos = txt.lastIndexOf("#");
+    if(hashPos < 0) return null;
+    const prompt = txt.slice(0, hashPos).trim();
+    const display = normalizeCommandDisplay(txt.slice(hashPos + 1));
+    if(!prompt || !display) return null;
+    if(/\s/.test(prompt)) return null;
+    const firstToken = display.split(/\s+/, 1)[0] || "";
+    // Guard against lines like "hostname#060 uptime is ...".
+    if(/^\d+$/.test(firstToken)) return null;
+    return { prompt, display };
+  }
+
+  function collectPromptHints(lines){
+    const hints = new Set();
+    for(const line of (Array.isArray(lines) ? lines : [])){
+      const parsed = parsePromptCommandLine(line);
+      if(!parsed) continue;
+      const probe = `# ${parsed.display}`;
+      const isKnown =
+        relevantCmdRegex.showClock.test(probe)
+        || relevantCmdRegex.showVersion.test(probe)
+        || relevantCmdRegex.showRun.test(probe)
+        || relevantCmdRegex.showLog.test(probe)
+        || relevantCmdRegex.showEnvAll.test(probe)
+        || relevantCmdRegex.showIntCrc.test(probe);
+      if(isKnown){
+        hints.add(parsed.prompt);
+      }
+    }
+    return hints;
+  }
+
+  function detectRelevantCommand(line, promptHints=null){
+    const parsed = parsePromptCommandLine(line);
+    if(!parsed) return null;
+    const hasHints = promptHints instanceof Set && promptHints.size > 0;
+    if(hasHints && !promptHints.has(parsed.prompt)) return null;
+    const display = parsed.display;
 
     const probe = `# ${display}`;
     if(relevantCmdRegex.showClock.test(probe)) return { kind: "show clock", display };
@@ -1776,8 +1814,9 @@
 
     const observedOrder = [];
     const observedDisplay = [];
+    const promptHints = collectPromptHints(kept);
     for(const ln of kept){
-      const cmd = detectRelevantCommand(ln);
+      const cmd = detectRelevantCommand(ln, promptHints);
       if(cmd){
         observedOrder.push(cmd.kind);
         observedDisplay.push(cmd.display);
@@ -2547,4 +2586,3 @@ System serial number : CAT1028RLCW
 </script>
 </body>
 </html>
-
