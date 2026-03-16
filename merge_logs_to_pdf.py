@@ -6,6 +6,7 @@ import random
 import re
 import textwrap
 import zipfile
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -128,14 +129,18 @@ def _format_clock_time_line(
     fraction_digits: int,
     timezone_token: str,
     prefix: str,
+    fraction_override: str | None = None,
 ) -> str:
     base = f"{dt.hour:02d}:{dt.minute:02d}:{dt.second:02d}"
     if fraction_digits > 0:
-        base_fraction = f"{dt.microsecond:06d}"
-        if fraction_digits <= 6:
-            fraction = base_fraction[:fraction_digits]
+        if fraction_override is not None:
+            fraction = fraction_override
         else:
-            fraction = base_fraction + ("0" * (fraction_digits - 6))
+            base_fraction = f"{dt.microsecond:06d}"
+            if fraction_digits <= 6:
+                fraction = base_fraction[:fraction_digits]
+            else:
+                fraction = base_fraction + ("0" * (fraction_digits - 6))
         base = f"{base}.{fraction}"
     weekday = WEEKDAYS[dt.weekday()]
     month = MONTHS[dt.month - 1]
@@ -150,6 +155,15 @@ def _randomize_microsecond_for_precision(fraction_digits: int) -> int:
     visible_max = (10 ** fraction_digits) - 1
     step = 10 ** (6 - fraction_digits)
     return random.randint(0, visible_max) * step
+
+
+def _randomize_fraction_text(fraction_digits: int) -> str:
+    if fraction_digits <= 0:
+        return ""
+    if fraction_digits <= 6:
+        value = random.randint(0, (10**fraction_digits) - 1)
+        return f"{value:0{fraction_digits}d}"
+    return "".join(str(random.randint(0, 9)) for _ in range(fraction_digits))
 
 
 def _is_show_clock_command(line: str) -> bool:
@@ -342,9 +356,13 @@ def _force_interface_errors_to_dash(lines: list[str]) -> list[str]:
     return out
 
 
-def _adjust_show_clock_lines(lines: list[str], options: FdoClockOptions | None = None) -> list[str]:
+def _adjust_show_clock_lines(
+    lines: list[str],
+    options: FdoClockOptions | None = None,
+    forced_fraction_digits: int | None = None,
+) -> list[str]:
     opts = options or FdoClockOptions()
-    blocks: list[tuple[int, datetime, int, str, str]] = []
+    blocks: list[tuple[int, datetime, int, str, str, str]] = []
 
     for idx, line in enumerate(lines):
         if not _is_show_clock_command(line):
@@ -358,24 +376,68 @@ def _adjust_show_clock_lines(lines: list[str], options: FdoClockOptions | None =
         if not parsed:
             continue
         dt, fraction_digits, timezone_token, prefix = parsed
-        blocks.append((value_idx, dt, fraction_digits, timezone_token, prefix))
+        source_match = TIME_LINE_PATTERN.match(lines[value_idx])
+        source_fraction = (source_match.group(5) or "") if source_match else ""
+        blocks.append((value_idx, dt, fraction_digits, timezone_token, prefix, source_fraction))
 
     if len(blocks) < 3:
         return lines
 
-    line1_idx, dt1_raw, has_ms1, tz1, prefix1 = blocks[0]
-    line2_idx, _dt2_raw, has_ms2, tz2, prefix2 = blocks[1]
-    line3_idx, _dt3_raw, has_ms3, tz3, prefix3 = blocks[2]
+    line1_idx, dt1_raw, frac_digits1_src, tz1, prefix1, src_frac1 = blocks[0]
+    line2_idx, _dt2_raw, frac_digits2_src, tz2, prefix2, src_frac2 = blocks[1]
+    line3_idx, _dt3_raw, frac_digits3_src, tz3, prefix3, src_frac3 = blocks[2]
 
-    def apply_fraction_precision(dt: datetime, fraction_digits: int) -> datetime:
+    if forced_fraction_digits is None:
+        frac_digits1 = frac_digits1_src
+        frac_digits2 = frac_digits2_src
+        frac_digits3 = frac_digits3_src
+    else:
+        enforced_digits = max(0, forced_fraction_digits)
+        frac_digits1 = enforced_digits
+        frac_digits2 = enforced_digits
+        frac_digits3 = enforced_digits
+
+    used_fraction_by_digits: dict[int, set[str]] = {}
+    blocked_source_fraction_by_digits: dict[int, set[str]] = {}
+    for digits, source_fraction in (
+        (frac_digits1, src_frac1),
+        (frac_digits2, src_frac2),
+        (frac_digits3, src_frac3),
+    ):
+        if digits <= 0:
+            continue
+        blocked = blocked_source_fraction_by_digits.setdefault(digits, set())
+        if source_fraction:
+            blocked.add(source_fraction)
+
+    def apply_fraction_precision(dt: datetime, fraction_digits: int) -> tuple[datetime, str | None]:
         if fraction_digits <= 0:
-            return dt.replace(microsecond=0)
-        if fraction_digits < 6:
-            step = 10 ** (6 - fraction_digits)
-            return dt.replace(microsecond=(dt.microsecond // step) * step)
-        if fraction_digits > 6:
-            return dt.replace(microsecond=_randomize_microsecond_for_precision(fraction_digits))
-        return dt
+            return dt.replace(microsecond=0), None
+
+        seen = used_fraction_by_digits.setdefault(fraction_digits, set())
+        blocked = blocked_source_fraction_by_digits.get(fraction_digits, set())
+        for _ in range(24):
+            candidate_text = _randomize_fraction_text(fraction_digits)
+            if candidate_text in seen or candidate_text in blocked:
+                continue
+            seen.add(candidate_text)
+            candidate_us = int(candidate_text[:6].ljust(6, "0"))
+            return dt.replace(microsecond=candidate_us), candidate_text
+
+        # Deterministic fallback for small domains.
+        if fraction_digits <= 6:
+            for value in range(10**fraction_digits):
+                candidate_text = f"{value:0{fraction_digits}d}"
+                if candidate_text in seen or candidate_text in blocked:
+                    continue
+                seen.add(candidate_text)
+                candidate_us = int(candidate_text[:6].ljust(6, "0"))
+                return dt.replace(microsecond=candidate_us), candidate_text
+
+        # Last fallback keeps randomness.
+        candidate_text = _randomize_fraction_text(fraction_digits)
+        candidate_us = int(candidate_text[:6].ljust(6, "0"))
+        return dt.replace(microsecond=candidate_us), candidate_text
 
     # Clock #1 behavior:
     # - auto mode (checkbox OFF): keep original clock #1 unchanged
@@ -408,22 +470,24 @@ def _adjust_show_clock_lines(lines: list[str], options: FdoClockOptions | None =
         range_us = int((dt1_window_end - dt1_window_start).total_seconds() * 1_000_000)
         offset_us = random.randint(0, max(0, range_us))
         dt1_new = dt1_window_start + timedelta(microseconds=offset_us)
-        dt1_new = apply_fraction_precision(dt1_new, has_ms1)
     else:
         # Keep clock #1 as-is from source when custom mode is not selected.
         dt1_new = dt1_raw
 
+    # Always randomize fraction according to source precision (if present).
+    dt1_new, frac1_new = apply_fraction_precision(dt1_new, frac_digits1)
+
     delta12_sec = random.randint(40, 90)
     delta23_sec = random.randint(420, 450)
     dt2_new = dt1_new + timedelta(seconds=delta12_sec)
-    dt2_new = apply_fraction_precision(dt2_new, has_ms2)
+    dt2_new, frac2_new = apply_fraction_precision(dt2_new, frac_digits2)
     dt3_new = dt2_new + timedelta(seconds=delta23_sec)
-    dt3_new = apply_fraction_precision(dt3_new, has_ms3)
+    dt3_new, frac3_new = apply_fraction_precision(dt3_new, frac_digits3)
 
     out = lines[:]
-    out[line1_idx] = _format_clock_time_line(dt1_new, has_ms1, tz1, prefix1)
-    out[line2_idx] = _format_clock_time_line(dt2_new, has_ms2, tz2, prefix2)
-    out[line3_idx] = _format_clock_time_line(dt3_new, has_ms3, tz3, prefix3)
+    out[line1_idx] = _format_clock_time_line(dt1_new, frac_digits1, tz1, prefix1, fraction_override=frac1_new)
+    out[line2_idx] = _format_clock_time_line(dt2_new, frac_digits2, tz2, prefix2, fraction_override=frac2_new)
+    out[line3_idx] = _format_clock_time_line(dt3_new, frac_digits3, tz3, prefix3, fraction_override=frac3_new)
     return out
 
 
@@ -443,6 +507,33 @@ def _extract_show_clock_entries(lines: list[str]) -> list[tuple[int, int, dateti
         dt, _fraction_digits, _tz, _prefix = parsed
         entries.append((idx, value_idx, dt, lines[value_idx]))
     return entries
+
+
+def _clock_fraction_digits_tuple(
+    clock_entries: list[tuple[int, int, datetime, str]],
+) -> tuple[int, int, int] | None:
+    if len(clock_entries) < 3:
+        return None
+    digits: list[int] = []
+    for idx in range(3):
+        parsed = _parse_clock_time_line(clock_entries[idx][3])
+        if not parsed:
+            return None
+        _dt, fraction_digits, _tz, _prefix = parsed
+        digits.append(fraction_digits)
+    return digits[0], digits[1], digits[2]
+
+
+def _resolve_auto_fix_fraction_digits(
+    clock_entries: list[tuple[int, int, datetime, str]],
+) -> int | None:
+    digits_tuple = _clock_fraction_digits_tuple(clock_entries)
+    if digits_tuple is None:
+        return None
+    counts = Counter(digits_tuple)
+    if len(counts) == 2 and 2 in counts.values():
+        return counts.most_common(1)[0][0]
+    return None
 
 
 def _wrapped_seconds_diff(start: datetime, end: datetime) -> int:
@@ -569,6 +660,49 @@ def _build_fdo_validation_report(
         if clock_before[idx][3] != clock_after[idx][3]:
             clock_changed_lines += 1
 
+    style_before_digits = _clock_fraction_digits_tuple(clock_before)
+    style_after_digits = _clock_fraction_digits_tuple(clock_after)
+
+    def style_digits_text(value: tuple[int, int, int] | None) -> str:
+        if value is None:
+            return "N/A"
+        return f"{value[0]}/{value[1]}/{value[2]}"
+
+    same_style_before = False
+    same_style_after = False
+    if style_before_digits is not None:
+        same_style_before = len(set(style_before_digits)) == 1
+    if style_after_digits is not None:
+        same_style_after = len(set(style_after_digits)) == 1
+
+    style_majority_target = _resolve_auto_fix_fraction_digits(clock_before)
+    if style_before_digits is None or style_after_digits is None:
+        style_gate_ok = False
+        style_detail = "missing valid show clock data (need 3 parsed clock lines before/after)."
+    elif same_style_before:
+        style_gate_ok = True
+        style_detail = f"already same style from source ({style_digits_text(style_before_digits)})."
+    elif style_majority_target is not None:
+        if same_style_after and style_after_digits[0] == style_majority_target:
+            style_gate_ok = True
+            style_detail = (
+                "mismatch detected and auto-fixed to "
+                f"{style_majority_target} digits ({style_digits_text(style_before_digits)} -> "
+                f"{style_digits_text(style_after_digits)})."
+            )
+        else:
+            style_gate_ok = False
+            style_detail = (
+                "mismatch detected (2 same, 1 different) but auto-fix result is not uniform: "
+                f"{style_digits_text(style_before_digits)} -> {style_digits_text(style_after_digits)}."
+            )
+    else:
+        style_gate_ok = False
+        style_detail = (
+            "mismatch detected and cannot auto-fix because no majority style "
+            f"({style_digits_text(style_before_digits)})."
+        )
+
     show_log_position_ok = False
     show_log_detail = "ต้องมี show interface counters errors 2 คำสั่งก่อนจึงจะตรวจตำแหน่ง Show log ได้"
     if len(interface_cmd_indices) >= 2:
@@ -590,7 +724,8 @@ def _build_fdo_validation_report(
 
     counts_ok = all(found == required for _, found, required in expected_counts)
     deltas_ok = range_12_ok and range_23_ok
-    overall_ok = counts_ok and order_ok and placement_ok and deltas_ok and show_log_ok
+    overall_ok = counts_ok and order_ok and placement_ok and deltas_ok and show_log_ok and style_gate_ok
+    result_status = "ผ่าน" if overall_ok else "ไม่ผ่าน"
 
     clear_detail_lines = []
     if clear_removed_lines:
@@ -599,7 +734,7 @@ def _build_fdo_validation_report(
             clear_detail_lines.append(f"- line {line_no}: {line_text}")
 
     report_lines = [
-        f"ผลการตรวจสอบ: {'ผ่าน' if overall_ok else 'ไม่ผ่าน'}",
+        f"ผลการตรวจสอบ: {result_status}",
         "",
         "การเปลี่ยนแปลงที่ระบบทำ:",
         f"- ลบบรรทัด clear: {clear_removed}",
@@ -643,6 +778,7 @@ def _build_fdo_validation_report(
         )
 
     report_lines.extend(["", "รายละเอียดเวลา clock ที่เปลี่ยน:"])
+
     if len(clock_before) < 3 or len(clock_after) < 3:
         report_lines.append("- ไม่มีข้อมูล (ต้องมีเวลา show clock ที่ถูกต้องก่อนและหลังอย่างละ 3 จุด)")
     else:
@@ -650,6 +786,13 @@ def _build_fdo_validation_report(
             before_line = clock_before[idx][3].strip()
             after_line = clock_after[idx][3].strip()
             report_lines.append(f"- clock #{idx+1}: {before_line} -> {after_line}")
+    report_lines.extend(
+        [
+            f"- before digits (#1/#2/#3): {style_digits_text(style_before_digits)}",
+            f"- after digits (#1/#2/#3): {style_digits_text(style_after_digits)}",
+            f"- detail: {style_detail}",
+        ]
+    )
 
     report_lines.extend(
         [
@@ -703,7 +846,12 @@ def _preprocess_fdo_lines_and_stats(
                 interface_row_changes.append(before)
 
     clock_before = _extract_show_clock_entries(lines_after_interface)
-    final_lines = _adjust_show_clock_lines(lines_after_interface, options=options)
+    auto_fix_fraction_digits = _resolve_auto_fix_fraction_digits(clock_before)
+    final_lines = _adjust_show_clock_lines(
+        lines_after_interface,
+        options=options,
+        forced_fraction_digits=auto_fix_fraction_digits,
+    )
     clock_after = _extract_show_clock_entries(final_lines)
 
     stats = FdoPreprocessStats(
